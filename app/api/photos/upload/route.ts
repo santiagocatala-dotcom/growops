@@ -1,53 +1,39 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireUserId } from "@/lib/auth"; // asumimos que ya lo tenés (o similar)
+import { requireUserId } from "@/lib/auth";
 import crypto from "crypto";
 
-export const runtime = "nodejs"; // importante para manejar File/Buffer bien en Vercel
+export const runtime = "nodejs";
 
 export async function POST(req: Request) {
   try {
-    const userId = await requireUserId(req);
+    const userId = await requireUserId();
 
     const form = await req.formData();
     const projectId = String(form.get("projectId") || "");
     const file = form.get("file") as File | null;
 
-    if (!projectId) {
-      return NextResponse.json({ error: "Falta projectId" }, { status: 400 });
-    }
-    if (!file) {
-      return NextResponse.json({ error: "Falta file" }, { status: 400 });
-    }
-    if (!file.type.startsWith("image/")) {
-      return NextResponse.json({ error: "Solo imágenes" }, { status: 400 });
-    }
+    if (!projectId) return NextResponse.json({ error: "Falta projectId" }, { status: 400 });
+    if (!file) return NextResponse.json({ error: "Falta file" }, { status: 400 });
+    if (!file.type.startsWith("image/")) return NextResponse.json({ error: "Solo imágenes" }, { status: 400 });
 
     const bytes = await file.arrayBuffer();
     const buffer = Buffer.from(bytes);
 
-    // nombre/extension
-    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-    const safeExt = ext.replace(/[^a-z0-9]/g, "") || "jpg";
+    const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
     const ymd = new Date().toISOString().slice(0, 10);
     const id = crypto.randomUUID();
+    const path = `${projectId}/${ymd}/${id}.${ext}`;
 
-    const path = `${projectId}/${ymd}/${id}.${safeExt}`;
-
-    // subir a Storage
     const { error: upErr } = await supabaseAdmin.storage
       .from("growops-photos")
-      .upload(path, buffer, {
-        contentType: file.type,
-        upsert: false,
-      });
+      .upload(path, buffer, { contentType: file.type, upsert: false });
 
     if (upErr) {
       console.error("UPLOAD ERROR:", upErr);
       return NextResponse.json({ error: "No se pudo subir" }, { status: 500 });
     }
 
-    // guardar metadata en DB
     const { data: row, error: insErr } = await supabaseAdmin
       .from("project_photos")
       .insert({
